@@ -88,6 +88,17 @@ class SimpleGridSimulator:
             "Profit": profit
         })
 
+    def log_hedge(self, order_type, entry_price, volume, exit_price=None, profit=0):
+        if not hasattr(self, 'hedge_log'):
+            self.hedge_log = []
+        self.hedge_log.append({
+            "Type": order_type,
+            "Entry Price": entry_price,
+            "Volume": volume,
+            "Exit Price": exit_price,
+            "Profit": profit
+        })
+
     def simulate(self):
         for i in range(len(self.prices)):
             price = self.prices[i]
@@ -136,7 +147,9 @@ class SimpleGridSimulator:
             if self.hedge_position:
                 combined_pnl = self.floating_pnl(price)
                 if combined_pnl >= 0 or new_direction != self.direction:
-                    self.balance += self.hedge_position.close(price)
+                    profit = self.hedge_position.close(price)
+                    self.log_hedge(self.hedge_position.order_type, self.hedge_position.entry_price, self.hedge_position.volume, price, profit)
+                    self.balance += profit
                     self.hedge_history.append(self.hedge_position)
                     self.hedge_position = None
 
@@ -192,6 +205,7 @@ class SimpleGridSimulator:
         hedge_type = "sell" if direction == "buy" else "buy"
         volume = (self.balance * 0.5) / price
         self.hedge_position = Position(hedge_type, price, volume)
+        self.log_hedge(hedge_type, price, volume)
 
     def detect_grid_bias(self):
         buys = sum(1 for p in self.positions if p.order_type == "buy")

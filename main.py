@@ -112,6 +112,18 @@ if hasattr(sim, 'order_log'):
     print(order_log_df.to_string(index=False))
     print("=================\n")
 
+# Вывод таблицы с логами хеджей
+if hasattr(sim, 'hedge_log'):
+    hedge_log_df = pd.DataFrame(sim.hedge_log)
+    print("\n=== Hedge Log ===")
+    print(hedge_log_df.to_string(index=False))
+    print("==================\n")
+
+    # Сохранение таблицы хеджей в файл
+    hedge_log_file = "hedge_log.csv"
+    hedge_log_df.to_csv(hedge_log_file, index=False)
+    print(f"Hedge log saved to {hedge_log_file}")
+
 # Добавление вывода итогового капитала, максимальной просадки и уплаченной комиссии
 final_equity = sim.equity_history[-1]
 peak = pd.Series(sim.equity_history).cummax()
