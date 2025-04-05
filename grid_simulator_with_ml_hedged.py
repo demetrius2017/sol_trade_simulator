@@ -99,6 +99,19 @@ class SimpleGridSimulator:
             "Profit": profit
         })
 
+    def find_target_exit_price(self, position):
+        """
+        Определяет целевую цену закрытия для позиции на основе сетки.
+        """
+        if position.order_type == "buy":
+            # Найти ближайший sell-уровень выше entry_price
+            target_prices = [price for order_type, price in self.grid if order_type == "sell" and price > position.entry_price]
+        else:
+            # Найти ближайший buy-уровень ниже entry_price
+            target_prices = [price for order_type, price in self.grid if order_type == "buy" and price < position.entry_price]
+
+        return min(target_prices, default=None) if position.order_type == "buy" else max(target_prices, default=None)
+
     def simulate(self):
         for i in range(len(self.prices)):
             price = self.prices[i]
@@ -124,13 +137,13 @@ class SimpleGridSimulator:
             new_positions = []
             realized_profit = 0
             for pos in self.positions:
-                if pos.order_type == "buy" and price >= self.grid_center:
-                    profit = pos.close(price)
-                    self.log_order(pos.order_type, pos.entry_price, pos.volume, price, profit)
-                    realized_profit += profit
-                elif pos.order_type == "sell" and price <= self.grid_center:
-                    profit = pos.close(price)
-                    self.log_order(pos.order_type, pos.entry_price, pos.volume, price, profit)
+                target_exit_price = self.find_target_exit_price(pos)
+                if target_exit_price is not None and (
+                    (pos.order_type == "buy" and price >= target_exit_price) or
+                    (pos.order_type == "sell" and price <= target_exit_price)
+                ):
+                    profit = pos.close(target_exit_price)
+                    self.log_order(pos.order_type, pos.entry_price, pos.volume, target_exit_price, profit)
                     realized_profit += profit
                 else:
                     new_positions.append(pos)
