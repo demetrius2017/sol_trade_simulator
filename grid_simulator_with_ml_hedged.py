@@ -20,14 +20,20 @@ class Position:
         else:
             return (self.entry_price - current_price) * self.volume
 
-    def close(self, exit_price):
+    def close(self, exit_price, taker_fee=0.0004, maker_fee=0.0002):
         self.exit_price = exit_price
         self.closed = True
-        return self.floating_profit(exit_price)
+
+        open_fee = self.entry_price * self.volume * maker_fee
+        close_fee = exit_price * self.volume * taker_fee
+        gross_profit = self.floating_profit(exit_price)
+        net_profit = gross_profit - open_fee - close_fee
+        return net_profit
+
 
 class SimpleGridSimulator:
     def __init__(self, prices, ema_values, features_df, model, scaler,
-                 initial_balance=100000, grid_step=0.01, grid_size=10,
+                 initial_balance=100000, grid_step=0.004, grid_size=30,
                  direction_change_threshold=0.1, timestamps=None):
         self.prices = prices
         self.ema_values = ema_values
