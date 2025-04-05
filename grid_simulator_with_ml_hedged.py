@@ -25,7 +25,6 @@ class Position:
         self.closed = True
         return self.floating_profit(exit_price)
 
-
 class SimpleGridSimulator:
     def __init__(self, prices, ema_values, features_df, model, scaler,
                  initial_balance=100000, grid_step=0.01, grid_size=10,
@@ -52,15 +51,14 @@ class SimpleGridSimulator:
         self.balance_history = []
         self.direction_history = []
         self.hedge_position = None
+        self.hedge_history = []
 
     def generate_grid(self, center_price):
         grid = []
         for i in range(1, self.grid_size + 1):
             delta = self.grid_step * i
-            buy_price = center_price * (1 - delta)
-            sell_price = center_price * (1 + delta)
-            grid.append(("buy", buy_price))
-            grid.append(("sell", sell_price))
+            grid.append(("buy", center_price * (1 - delta)))
+            grid.append(("sell", center_price * (1 + delta)))
         return grid
 
     def volume_by_direction(self, order_type):
@@ -72,12 +70,12 @@ class SimpleGridSimulator:
             return 1 if order_type == "buy" else 2
 
     def simulate(self):
-        from copy import deepcopy
         for i in range(len(self.prices)):
             price = self.prices[i]
             ema = self.ema_values[i]
             self.grid_center = ema
 
+            new_direction = self.direction
             if i < len(self.features_df):
                 scaled = self.scaler.transform([self.features_df.iloc[i]])
                 predicted_trend = self.model.predict(scaled)[0]
@@ -104,30 +102,29 @@ class SimpleGridSimulator:
                     new_positions.append(pos)
             self.positions = [p for p in new_positions if not p.closed]
             self.balance += realized_profit
-            # Хедж: активация при просадке >5% и отсутствии открытого хеджа
-            drawdown = self.get_drawdown(self.balance + floating)
-            if drawdown >= 0.05 and self.hedge_position is None:
-                self.open_hedge(price)
-
-            # Закрытие хеджа: если суммарная плавающая прибыль >= 0 или смена тренда
-            if self.hedge_position:
-                combined_pnl = self.floating_pnl(price)
-                if combined_pnl >= 0 or self.direction != self.direction_history[-1] if self.direction_history else False:
-                    self.balance += self.hedge_position.close(price)
-                    self.hedge_position = None
-
 
             floating = sum(p.floating_profit(price) for p in self.positions)
             equity = self.balance + floating
+            drawdown = self.get_drawdown(equity)
+
+            if drawdown >= 0.05 and self.hedge_position is None:
+                self.open_hedge(price)
+
+            if self.hedge_position:
+                combined_pnl = self.floating_pnl(price)
+                if combined_pnl >= 0 or new_direction != self.direction:
+                    self.balance += self.hedge_position.close(price)
+                    self.hedge_history.append(self.hedge_position)
+                    self.hedge_position = None
+
+            if equity > self.max_equity:
+                self.max_equity = equity
+            if equity < self.max_equity * (1 - self.direction_change_threshold):
+                self.switch_direction()
+
             self.equity_history.append(equity)
             self.balance_history.append(self.balance)
             self.direction_history.append(self.direction)
-
-            if equity < self.max_equity * (1 - self.direction_change_threshold):
-                self.switch_direction()
-                self.max_equity = equity
-            elif equity > self.max_equity:
-                self.max_equity = equity
 
     def switch_direction(self):
         if self.direction == "neutral":
@@ -139,25 +136,21 @@ class SimpleGridSimulator:
         self.positions = []
 
     def plot(self):
-        x_raw = self.timestamps[:len(self.equity_history)]
-        x = pd.to_datetime(x_raw)
-
+        x = pd.date_range(start="2024-01-01", periods=len(self.equity_history), freq="s")
         plt.figure(figsize=(14, 6))
         plt.plot(x, self.equity_history, label="Equity")
         plt.plot(x, self.balance_history, linestyle="--", label="Balance")
-
-        plt.title("Grid Strategy Simulation with ML Trend Direction")
+        plt.title("Grid Strategy with ML & Hedge")
         plt.xlabel("Time")
         plt.ylabel("USD")
         plt.legend()
         plt.grid(True)
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-        plt.gcf().autofmt_xdate()
         plt.tight_layout()
         plt.show()
 
-
     def get_drawdown(self, equity):
+        if self.max_equity == 0:
+            return 0.0
         return (self.max_equity - equity) / self.max_equity
 
     def floating_pnl(self, price):
@@ -168,6 +161,8 @@ class SimpleGridSimulator:
     def open_hedge(self, price):
         direction = self.detect_grid_bias()
         if direction is None:
+            direction = self.direction
+        if direction == "neutral":
             return
         hedge_type = "sell" if direction == "buy" else "buy"
         volume = (self.balance * 0.5) / price
