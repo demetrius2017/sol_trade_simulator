@@ -1,10 +1,6 @@
 
 import pandas as pd
-import os
 import numpy as np
-from get_tick_from_OHLC import generate_ticks_from_ohlcv
-from grid_simulator_with_ml import SimpleGridSimulator
-import pickle
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -56,57 +52,3 @@ def train_trend_predictor(df):
     report = classification_report(y_test, predictions)
 
     return model, scaler, df_ml, acc, conf, report
-
-df = pd.read_csv("solana-20250322143418221.csv")
-
-tick_file = "solana_tick_data.csv"
-if os.path.exists(tick_file):
-    tick_df = pd.read_csv(tick_file)
-else:
-    tick_df = generate_ticks_from_ohlcv(df)
-    tick_df.to_csv(tick_file, index=False)
-
-prices = tick_df['price'].values
-timestamps = tick_df['timestamp'].values
-
-def compute_ema(prices, period):
-    ema = []
-    k = 2 / (period + 1)
-    for i, price in enumerate(prices):
-        if i < period:
-            ema.append(sum(prices[:i+1]) / (i+1))
-        else:
-            ema.append(price * k + ema[-1] * (1 - k))
-    return ema
-
-ema_values = compute_ema(prices, 20)
-
-model_file = "grid_model.pkl"
-if os.path.exists(model_file):
-    with open(model_file, "rb") as f:
-        model, scaler = pickle.load(f)
-    df['Close'] = df['priceClose']
-    model, scaler, df_ml, _, _, _ = train_trend_predictor(df)
-    X = df_ml[['EMA12', 'EMA26', 'MACD', 'RSI', 'Volatility', 'Return']]
-else:
-    df['Close'] = df['priceClose']
-    model, scaler, df_ml, acc, conf, report = train_trend_predictor(df)
-    X = df_ml[['EMA12', 'EMA26', 'MACD', 'RSI', 'Volatility', 'Return']]
-    with open(model_file, "wb") as f:
-        pickle.dump((model, scaler), f)
-
-features_df = pd.DataFrame([X.iloc[-1]] * len(prices), columns=X.columns)
-
-sim = SimpleGridSimulator(
-    prices=prices,
-    ema_values=ema_values,
-    features_df=features_df,
-    model=model,
-    scaler=scaler,
-    timestamps=timestamps
-)
-sim.simulate()
-sim.plot()
-
-with open("grid_simulation_with_ml.pkl", "wb") as f:
-    pickle.dump(sim, f)

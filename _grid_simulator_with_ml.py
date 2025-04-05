@@ -1,8 +1,6 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 
@@ -29,13 +27,12 @@ class Position:
 class SimpleGridSimulator:
     def __init__(self, prices, ema_values, features_df, model, scaler,
                  initial_balance=100000, grid_step=0.01, grid_size=10,
-                 direction_change_threshold=0.1, timestamps=None):
+                 direction_change_threshold=0.1):
         self.prices = prices
         self.ema_values = ema_values
         self.features_df = features_df
         self.model = model
         self.scaler = scaler
-        self.timestamps = timestamps if timestamps is not None else list(range(len(prices)))
 
         self.balance = initial_balance
         self.initial_balance = initial_balance
@@ -76,13 +73,14 @@ class SimpleGridSimulator:
             ema = self.ema_values[i]
             self.grid_center = ema
 
+            # ML прогноз тренда
             if i < len(self.features_df):
                 scaled = self.scaler.transform([self.features_df.iloc[i]])
                 predicted_trend = self.model.predict(scaled)[0]
                 new_direction = {1: "long", -1: "short", 0: "neutral"}[predicted_trend]
                 if new_direction != self.direction:
                     self.direction = new_direction
-                    self.positions = []
+                    self.positions = []  # закрываем все при смене
 
             self.grid = self.generate_grid(self.grid_center)
 
@@ -125,19 +123,12 @@ class SimpleGridSimulator:
         self.positions = []
 
     def plot(self):
-        x_raw = self.timestamps[:len(self.equity_history)]
-        x = pd.to_datetime(x_raw)
-
         plt.figure(figsize=(14, 6))
-        plt.plot(x, self.equity_history, label="Equity")
-        plt.plot(x, self.balance_history, linestyle="--", label="Balance")
-
+        plt.plot(self.equity_history, label="Equity")
+        plt.plot(self.balance_history, label="Balance", linestyle="--")
         plt.title("Grid Strategy Simulation with ML Trend Direction")
-        plt.xlabel("Time")
+        plt.xlabel("Steps")
         plt.ylabel("USD")
         plt.legend()
         plt.grid(True)
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-        plt.gcf().autofmt_xdate()
-        plt.tight_layout()
         plt.show()

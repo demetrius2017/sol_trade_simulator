@@ -1,3 +1,4 @@
+
 import pandas as pd
 
 def generate_ticks_from_ohlcv(df):
@@ -34,4 +35,8 @@ def generate_ticks_from_ohlcv(df):
     tick_df = pd.DataFrame(ticks)
     tick_df.sort_values('timestamp', inplace=True)
     tick_df.reset_index(drop=True, inplace=True)
+
+    # Преобразуем timestamp из миллисекунд в datetime
+    tick_df['timestamp'] = pd.to_datetime(tick_df['timestamp'], unit='ms')
+
     return tick_df
