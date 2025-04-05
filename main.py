@@ -1,4 +1,3 @@
-
 import pandas as pd
 import os
 import numpy as np
@@ -105,3 +104,54 @@ def extract_hedge_table(sim):
     return df
 
 extract_hedge_table(sim)
+
+# Вывод таблицы с логами ордеров
+if hasattr(sim, 'order_log'):
+    order_log_df = pd.DataFrame(sim.order_log)
+    print("\n=== Order Log ===")
+    print(order_log_df.to_string(index=False))
+    print("=================\n")
+
+# Добавление вывода итогового капитала, максимальной просадки и уплаченной комиссии
+final_equity = sim.equity_history[-1]
+peak = pd.Series(sim.equity_history).cummax()
+max_drawdown = ((peak - sim.equity_history) / peak).max()
+
+# Обновление расчёта общей комиссии с использованием нового метода calculate_commission
+total_commission = sim.calculate_commission()
+
+print("\n=== Simulation Summary ===")
+print(f"Final Equity: {final_equity:.2f} USD")
+print(f"Max Drawdown: {max_drawdown:.2%}")
+print(f"Total Commission Paid: {total_commission:.2f} USD")
+print("==========================\n")
+
+# Сохранение деталей о текущем эквити, балансе и просадке в файл
+summary_data = {
+    "Final Equity": final_equity,
+    "Final Balance": sim.balance,
+    "Max Drawdown": max_drawdown,
+    "Total Commission Paid": total_commission
+}
+summary_file = "simulation_summary.csv"
+with open(summary_file, "w") as f:
+    for key, value in summary_data.items():
+        f.write(f"{key}: {value}\n")
+
+print(f"Simulation summary saved to {summary_file}")
+
+# Сохранение истории ордеров с текущим балансом, эквити и просадкой в файл
+if hasattr(sim, 'order_log'):
+    order_log_df = pd.DataFrame(sim.order_log)
+
+    # Убедимся, что длины совпадают, добавляя только те записи, которые соответствуют длине order_log
+    min_length = min(len(order_log_df), len(sim.balance_history), len(sim.equity_history))
+    order_log_df = order_log_df.iloc[:min_length]
+    order_log_df['Balance'] = sim.balance_history[:min_length]
+    order_log_df['Equity'] = sim.equity_history[:min_length]
+    order_log_df['Drawdown'] = [sim.get_drawdown(e) for e in sim.equity_history[:min_length]]
+
+    detailed_summary_file = "detailed_simulation_summary.csv"
+    order_log_df.to_csv(detailed_summary_file, index=False)
+
+    print(f"Detailed simulation summary saved to {detailed_summary_file}")

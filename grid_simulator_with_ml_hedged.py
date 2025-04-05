@@ -1,4 +1,3 @@
-
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -28,12 +27,15 @@ class Position:
         close_fee = exit_price * self.volume * taker_fee
         gross_profit = self.floating_profit(exit_price)
         net_profit = gross_profit - open_fee - close_fee
+
+        # Учет комиссии в расчете прибыли
+        self.profit = net_profit
         return net_profit
 
 
 class SimpleGridSimulator:
     def __init__(self, prices, ema_values, features_df, model, scaler,
-                 initial_balance=100000, grid_step=0.004, grid_size=30,
+                 initial_balance=100000, grid_step=0.001, grid_size=70,
                  direction_change_threshold=0.1, timestamps=None):
         self.prices = prices
         self.ema_values = ema_values
@@ -75,6 +77,17 @@ class SimpleGridSimulator:
         if self.direction == "short":
             return 1 if order_type == "buy" else 2
 
+    def log_order(self, order_type, entry_price, volume, exit_price=None, profit=0):
+        if not hasattr(self, 'order_log'):
+            self.order_log = []
+        self.order_log.append({
+            "Type": order_type,
+            "Entry Price": entry_price,
+            "Volume": volume,
+            "Exit Price": exit_price,
+            "Profit": profit
+        })
+
     def simulate(self):
         for i in range(len(self.prices)):
             price = self.prices[i]
@@ -101,9 +114,13 @@ class SimpleGridSimulator:
             realized_profit = 0
             for pos in self.positions:
                 if pos.order_type == "buy" and price >= self.grid_center:
-                    realized_profit += pos.close(price)
+                    profit = pos.close(price)
+                    self.log_order(pos.order_type, pos.entry_price, pos.volume, price, profit)
+                    realized_profit += profit
                 elif pos.order_type == "sell" and price <= self.grid_center:
-                    realized_profit += pos.close(price)
+                    profit = pos.close(price)
+                    self.log_order(pos.order_type, pos.entry_price, pos.volume, price, profit)
+                    realized_profit += profit
                 else:
                     new_positions.append(pos)
             self.positions = [p for p in new_positions if not p.closed]
@@ -155,9 +172,11 @@ class SimpleGridSimulator:
         plt.show()
 
     def get_drawdown(self, equity):
-        if self.max_equity == 0:
+        if not self.balance_history:
             return 0.0
-        return (self.max_equity - equity) / self.max_equity
+        current_balance = self.balance_history[-1]
+        drawdown = (current_balance - equity) / current_balance if current_balance > equity else 0.0
+        return drawdown
 
     def floating_pnl(self, price):
         grid_pnl = sum(p.floating_profit(price) for p in self.positions)
@@ -183,3 +202,26 @@ class SimpleGridSimulator:
             return "sell"
         else:
             return None
+
+    def calculate_max_drawdown(self):
+        max_drawdown = 0
+        peak = self.equity_history[0]
+        for equity in self.equity_history:
+            if equity > peak:
+                peak = equity
+            drawdown = (peak - equity) / peak
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
+        return max_drawdown
+
+    def calculate_commission(self):
+        total_commission = 0
+        for pos in self.positions + self.hedge_history:
+            entry_commission = pos.entry_price * pos.volume * 0.0002
+            exit_commission = (pos.exit_price or 0) * pos.volume * 0.0004
+            total_commission += entry_commission + exit_commission
+        for log in getattr(self, 'order_log', []):
+            entry_commission = log['Entry Price'] * log['Volume'] * 0.0002
+            exit_commission = (log['Exit Price'] or 0) * log['Volume'] * 0.0004
+            total_commission += entry_commission + exit_commission
+        return total_commission

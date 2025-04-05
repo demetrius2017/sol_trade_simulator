@@ -1,0 +1,4 @@
+Final Equity: 295963.83408306073
+Final Balance: 295966.4909234735
+Max Drawdown: 0.6783244538340638
+Total Commission Paid: 0.2573919890825513
