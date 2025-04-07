@@ -2,7 +2,9 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+# DAta files
+DATA/
+*.scv
 # C extensions
 *.so
 

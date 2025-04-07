@@ -99,45 +99,74 @@ class SimpleGridSimulator:
             "Profit": profit
         })
 
-    def find_target_exit_price(self, position):
+    def find_target_exit_price(self, position, current_price):
         """
-        Определяет целевую цену закрытия для позиции на основе сетки.
+        Определяет целевую цену закрытия для позиции на основе сетки и текущей цены.
         """
         if position.order_type == "buy":
-            # Найти ближайший sell-уровень выше entry_price
-            target_prices = [price for order_type, price in self.grid if order_type == "sell" and price > position.entry_price]
+            # Найти ближайший sell-уровень выше entry_price, но не выше текущей цены
+            target_prices = [price for order_type, price in self.grid if order_type == "sell" and position.entry_price < price <= current_price]
         else:
-            # Найти ближайший buy-уровень ниже entry_price
-            target_prices = [price for order_type, price in self.grid if order_type == "buy" and price < position.entry_price]
+            # Найти ближайший buy-уровень ниже entry_price, но не ниже текущей цены
+            target_prices = [price for order_type, price in self.grid if order_type == "buy" and position.entry_price > price >= current_price]
 
         return min(target_prices, default=None) if position.order_type == "buy" else max(target_prices, default=None)
 
     def simulate(self):
+        print(f"Начало симуляции: {len(self.prices)} ценовых точек, {len(self.ema_values)} значений EMA")
+        
+        # Преобразуем prices и ema_values в обычные списки, если они являются массивами NumPy
+        if isinstance(self.prices, np.ndarray):
+            self.prices = self.prices.tolist()
+        if isinstance(self.ema_values, np.ndarray):
+            self.ema_values = self.ema_values.tolist()
+        
+        # Проверка: если ema_values пусто, используем цены как центр сетки
+        if not self.ema_values and self.prices:
+            print("EMA значения не предоставлены, используем цены как центр сетки")
+            self.ema_values = self.prices.copy()
+        
+        # Проверка длин массивов
+        if len(self.ema_values) != len(self.prices):
+            print(f"Предупреждение: длины массивов не совпадают. Цены: {len(self.prices)}, EMA: {len(self.ema_values)}")
+            # Приводим массивы к одинаковой длине
+            min_len = min(len(self.prices), len(self.ema_values)) if self.ema_values else len(self.prices)
+            self.prices = self.prices[:min_len]
+            self.ema_values = self.ema_values[:min_len] if self.ema_values else self.prices.copy()
+            print(f"Массивы приведены к длине: {min_len}")
+        
         for i in range(len(self.prices)):
-            price = self.prices[i]
-            ema = self.ema_values[i]
+            if i % 100 == 0:  # Отладочное сообщение каждые 100 точек
+                print(f"Обработка точки {i}/{len(self.prices)}, цена: {self.prices[i]}")
+            
+            # Получаем значения как скаляры, а не как массивы
+            price = float(self.prices[i]) if isinstance(self.prices[i], np.ndarray) else self.prices[i]
+            ema = float(self.ema_values[i]) if isinstance(self.ema_values[i], np.ndarray) else self.ema_values[i]
             self.grid_center = ema
 
             new_direction = self.direction
             if i < len(self.features_df):
-                scaled = self.scaler.transform([self.features_df.iloc[i]])
-                predicted_trend = self.model.predict(scaled)[0]
-                new_direction = {1: "long", -1: "short", 0: "neutral"}[predicted_trend]
-                if new_direction != self.direction:
-                    self.direction = new_direction
-                    self.positions = []
-
+                try:
+                    scaled = self.scaler.transform([self.features_df.iloc[i]])
+                    predicted_trend = self.model.predict(scaled)[0]
+                    new_direction = {1: "long", -1: "short", 0: "neutral"}[predicted_trend]
+                    if new_direction != self.direction:
+                        self.direction = new_direction
+                        self.positions = []
+                except Exception as e:
+                    print(f"Ошибка при предсказании тренда: {e}")
+            
             self.grid = self.generate_grid(self.grid_center)
-
+            
             for order_type, order_price in self.grid:
                 if (order_type == "buy" and price <= order_price) or (order_type == "sell" and price >= order_price):
                     volume = self.volume_by_direction(order_type)
                     self.positions.append(Position(order_type, order_price, volume))
-
+            
             new_positions = []
             realized_profit = 0
             for pos in self.positions:
-                target_exit_price = self.find_target_exit_price(pos)
+                target_exit_price = self.find_target_exit_price(pos, price)
                 if target_exit_price is not None and (
                     (pos.order_type == "buy" and price >= target_exit_price) or
                     (pos.order_type == "sell" and price <= target_exit_price)
@@ -149,14 +178,14 @@ class SimpleGridSimulator:
                     new_positions.append(pos)
             self.positions = [p for p in new_positions if not p.closed]
             self.balance += realized_profit
-
+            
             floating = sum(p.floating_profit(price) for p in self.positions)
             equity = self.balance + floating
             drawdown = self.get_drawdown(equity)
-
+            
             if drawdown >= 0.05 and self.hedge_position is None:
                 self.open_hedge(price)
-
+            
             if self.hedge_position:
                 combined_pnl = self.floating_pnl(price)
                 if combined_pnl >= 0 or new_direction != self.direction:
@@ -165,15 +194,44 @@ class SimpleGridSimulator:
                     self.balance += profit
                     self.hedge_history.append(self.hedge_position)
                     self.hedge_position = None
-
+            
             if equity > self.max_equity:
                 self.max_equity = equity
             if equity < self.max_equity * (1 - self.direction_change_threshold):
                 self.switch_direction()
-
+            
             self.equity_history.append(equity)
             self.balance_history.append(self.balance)
             self.direction_history.append(self.direction)
+        
+        print(f"Симуляция завершена. Длина equity_history: {len(self.equity_history)}")
+        if not self.equity_history:
+            print("ВНИМАНИЕ: equity_history пуст!")
+
+    def simulate_with_ticks(self, tick_data, batch_size=10000):
+        """
+        Симуляция с использованием тиковых данных, обработка порциями.
+        """
+        total_ticks = len(tick_data)
+        for batch_start in range(0, total_ticks, batch_size):
+            batch_end = min(batch_start + batch_size, total_ticks)
+            batch = tick_data.iloc[batch_start:batch_end]
+
+            for i, row in batch.iterrows():
+                price = row['price']
+                timestamp = row['timestamp']
+                # Обработка текущего тика
+                # ...existing tick processing logic...
+
+                # Логирование прогресса
+                if i % (total_ticks // 100) == 0:  # Каждые 1%
+                    progress = (i / total_ticks) * 100
+                    print(f"Прогресс симуляции: {progress:.1f}%")
+
+            # Обновление графика после каждой порции
+            self.equity_history.append(self.balance + sum(p.floating_profit(price) for p in self.positions))
+
+        print("Симуляция завершена.")
 
     def switch_direction(self):
         if self.direction == "neutral":
@@ -185,6 +243,13 @@ class SimpleGridSimulator:
         self.positions = []
 
     def plot(self):
+        """
+        Построение графика на основе текущих данных симуляции.
+        """
+        if not self.equity_history or not self.balance_history:
+            print("Нет данных для построения графика.")
+            return
+
         x = pd.date_range(start="2024-01-01", periods=len(self.equity_history), freq="s")
         plt.figure(figsize=(14, 6))
         plt.plot(x, self.equity_history, label="Equity")
@@ -196,6 +261,41 @@ class SimpleGridSimulator:
         plt.grid(True)
         plt.tight_layout()
         plt.show()
+
+        # Вывод итогового резюме симуляции
+        self.print_simulation_summary()
+
+    def print_simulation_summary(self):
+        """
+        Вывод итогового резюме симуляции.
+        """
+        final_equity = self.equity_history[-1] if self.equity_history else self.initial_balance
+        max_drawdown = self.calculate_max_drawdown() * 100
+        total_commission = self.calculate_commission()
+
+        print("\n=== Simulation Summary ===")
+        print(f"Final Equity: {final_equity:.2f} USD")
+        print(f"Max Drawdown: {max_drawdown:.2f}%")
+        print(f"Total Commission Paid: {total_commission:.2f} USD")
+        print("==========================")
+
+        # Сохранение итогов в CSV
+        summary_data = {
+            "Final Equity": [final_equity],
+            "Max Drawdown (%)": [max_drawdown],
+            "Total Commission Paid (USD)": [total_commission]
+        }
+        pd.DataFrame(summary_data).to_csv("simulation_summary.csv", index=False)
+        print("Simulation summary saved to simulation_summary.csv")
+
+        # Сохранение детализированного резюме
+        detailed_data = {
+            "Equity History": self.equity_history,
+            "Balance History": self.balance_history,
+            "Direction History": self.direction_history
+        }
+        pd.DataFrame(detailed_data).to_csv("detailed_simulation_summary.csv", index=False)
+        print("Detailed simulation summary saved to detailed_simulation_summary.csv")
 
     def get_drawdown(self, equity):
         if not self.balance_history:

@@ -1,4 +1,3 @@
-
 import pandas as pd
 
 def generate_ticks_from_ohlcv(df):
@@ -12,23 +11,23 @@ def generate_ticks_from_ohlcv(df):
     for _, row in df.iterrows():
         # Добавляем Open
         ticks.append({
-            'timestamp': row['timeOpen'],
-            'price': row['priceOpen'],
+            'timestamp': row['Open time'],
+            'price': row['Open'],
             'source': 'open'
         })
 
         # Определяем последовательность high/low
-        if row['timeHigh'] < row['timeLow']:
-            ticks.append({'timestamp': row['timeHigh'], 'price': row['priceHigh'], 'source': 'high'})
-            ticks.append({'timestamp': row['timeLow'],  'price': row['priceLow'],  'source': 'low'})
+        if row['High'] > row['Low']:
+            ticks.append({'timestamp': row['Open time'], 'price': row['High'], 'source': 'high'})
+            ticks.append({'timestamp': row['Open time'], 'price': row['Low'],  'source': 'low'})
         else:
-            ticks.append({'timestamp': row['timeLow'],  'price': row['priceLow'],  'source': 'low'})
-            ticks.append({'timestamp': row['timeHigh'], 'price': row['priceHigh'], 'source': 'high'})
+            ticks.append({'timestamp': row['Open time'], 'price': row['Low'],  'source': 'low'})
+            ticks.append({'timestamp': row['Open time'], 'price': row['High'], 'source': 'high'})
 
         # Добавляем Close
         ticks.append({
-            'timestamp': row['timeClose'],
-            'price': row['priceClose'],
+            'timestamp': row['Open time'],
+            'price': row['Close'],
             'source': 'close'
         })
 
@@ -36,7 +35,13 @@ def generate_ticks_from_ohlcv(df):
     tick_df.sort_values('timestamp', inplace=True)
     tick_df.reset_index(drop=True, inplace=True)
 
-    # Преобразуем timestamp из миллисекунд в datetime
-    tick_df['timestamp'] = pd.to_datetime(tick_df['timestamp'], unit='ms')
-
     return tick_df
+
+def load_tick_data(filepath):
+    """
+    Загружает тиковые данные из файла и преобразует timestamp из наносекунд в миллисекунды.
+    """
+    columns = ["trade_id", "price", "qty", "quote_qty", "timestamp", "is_buyer_maker", "is_best_match"]
+    data = pd.read_csv(filepath, names=columns)
+    data['timestamp'] = data['timestamp'] // 1_000_000  # Преобразование в миллисекунды
+    return data
